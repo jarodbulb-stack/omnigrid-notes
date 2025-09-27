@@ -857,8 +857,15 @@
             }
         }
 
-        // UI Functions
+        // UI Functions with safety checks
         function render() {
+            // Clear any existing content first to prevent duplication
+            const generalContainer = document.getElementById('generalNotes');
+            const vaultContainer = document.getElementById('vaultNotes');
+            
+            if (generalContainer) generalContainer.innerHTML = '';
+            if (vaultContainer) vaultContainer.innerHTML = '';
+            
             renderNotes('general');
             renderNotes('vault');
             updateStats();
@@ -869,6 +876,9 @@
             const notes = type === 'general' ? appData.generalNotes : appData.vaultNotes;
             const container = document.getElementById(type + 'Notes');
             
+            if (!container) return;
+            
+            // Ensure container is empty before rendering
             container.innerHTML = '';
             
             if (notes.length === 0) {
@@ -999,8 +1009,12 @@
             const notes = type === 'general' ? appData.generalNotes : appData.vaultNotes;
             const note = notes.find(n => n.id === id);
             
-            if (!note) return;
+            if (!note) {
+                showNotification('Note not found', 'error');
+                return;
+            }
 
+            // Set viewing context for edit/delete buttons
             appData.viewingNote = id;
             appData.viewingType = type;
 
@@ -1052,13 +1066,29 @@
         }
 
         function editFromView() {
-            closeModal('view');
-            editNote(appData.viewingNote, appData.viewingType);
+            // Capture the viewing context before closing modal
+            const noteId = appData.viewingNote;
+            const noteType = appData.viewingType;
+            
+            if (noteId && noteType) {
+                closeModal('view');
+                editNote(noteId, noteType);
+            } else {
+                showNotification('Error: No note selected for editing', 'error');
+            }
         }
 
         function deleteFromView() {
-            closeModal('view');
-            deleteNote(appData.viewingNote, appData.viewingType);
+            // Capture the viewing context before closing modal
+            const noteId = appData.viewingNote;
+            const noteType = appData.viewingType;
+            
+            if (noteId && noteType) {
+                closeModal('view');
+                deleteNote(noteId, noteType);
+            } else {
+                showNotification('Error: No note selected for deletion', 'error');
+            }
         }
 
         // Vault Operations
@@ -1143,7 +1173,7 @@
             saveData();
         }
 
-        // Import/Export
+        // Import/Export with Universal Compatibility
         function exportNotes(type) {
             const notes = type === 'general' ? appData.generalNotes : appData.vaultNotes;
             
@@ -1152,7 +1182,17 @@
                 return;
             }
 
-            const data = JSON.stringify(notes, null, 2);
+            // Universal export format - works with all versions
+            const exportData = {
+                notes: notes,
+                type: type,
+                version: "1.0",
+                appName: "MNIGRID Notes",
+                exportDate: new Date().toISOString(),
+                platform: "universal"
+            };
+
+            const data = JSON.stringify(exportData, null, 2);
             const blob = new Blob([data], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -1176,7 +1216,74 @@
             document.getElementById('fileInput').click();
         }
 
-        // Search
+        // Enhanced file import with universal compatibility
+        function handleFileImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    let validNotes = [];
+
+                    // Handle multiple import formats for universal compatibility
+                    if (Array.isArray(imported)) {
+                        // Format 1: Simple array [note1, note2, ...]
+                        validNotes = imported;
+                    } else if (imported.notes && Array.isArray(imported.notes)) {
+                        // Format 2: Object with notes array {notes: [note1, note2, ...]}
+                        validNotes = imported.notes;
+                    } else if (imported.data && Array.isArray(imported.data)) {
+                        // Format 3: Object with data array {data: [note1, note2, ...]}
+                        validNotes = imported.data;
+                    } else {
+                        showNotification('Unsupported file format - no valid notes found', 'error');
+                        return;
+                    }
+
+                    // Filter and validate notes
+                    const processedNotes = validNotes.filter(note => 
+                        note && (note.title || note.content)
+                    ).map(note => {
+                        // Ensure all notes have required fields
+                        return {
+                            id: note.id || Date.now() + Math.random(),
+                            title: note.title || 'Imported Note',
+                            content: note.content || '',
+                            created: note.created || new Date().toLocaleDateString(),
+                            createdTime: note.createdTime || new Date().toLocaleTimeString(),
+                            modified: note.modified || null
+                        };
+                    });
+
+                    if (processedNotes.length === 0) {
+                        showNotification('No valid notes found in file', 'error');
+                        return;
+                    }
+
+                    // Import the notes
+                    if (appData.importType === 'general') {
+                        appData.generalNotes = [...processedNotes, ...appData.generalNotes];
+                    } else {
+                        appData.vaultNotes = [...processedNotes, ...appData.vaultNotes];
+                    }
+
+                    saveData();
+                    render();
+                    showNotification(`Successfully imported ${processedNotes.length} notes!`, 'success');
+
+                } catch (error) {
+                    console.error('Import error:', error);
+                    showNotification('Error reading file - invalid JSON format', 'error');
+                }
+            };
+
+            reader.readAsText(file);
+            event.target.value = '';
+        }
+
+        // Search function
         function searchNotes(type, query) {
             const notes = type === 'general' ? appData.generalNotes : appData.vaultNotes;
             const container = document.getElementById(type + 'Notes');
