@@ -1216,70 +1216,109 @@
             document.getElementById('fileInput').click();
         }
 
-        // Enhanced file import with universal compatibility
+        // Simple Export/Import - Reverted to working browser method
+        function exportNotes(type) {
+            const notes = type === 'general' ? appData.generalNotes : appData.vaultNotes;
+            
+            if (notes.length === 0) {
+                showNotification(`No ${type} notes to export`, 'error');
+                return;
+            }
+
+            // Simple array format - exactly like browsers expect
+            const data = JSON.stringify(notes, null, 2);
+            const blob = new Blob([data], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `mnigrid-${type}-notes-${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            showNotification(`Exported ${notes.length} ${type} notes successfully!`, 'success');
+        }
+
         function handleFileImport(event) {
             const file = event.target.files[0];
             if (!file) return;
 
+            // Add mobile-specific file validation
+            if (file.type && !file.type.includes('json') && !file.name.endsWith('.json')) {
+                showNotification('Please select a JSON file', 'error');
+                return;
+            }
+
             const reader = new FileReader();
+            reader.onerror = function() {
+                showNotification('Error reading file - file may be corrupted', 'error');
+            };
+            
             reader.onload = (e) => {
                 try {
-                    const imported = JSON.parse(e.target.result);
-                    let validNotes = [];
-
-                    // Handle multiple import formats for universal compatibility
-                    if (Array.isArray(imported)) {
-                        // Format 1: Simple array [note1, note2, ...]
-                        validNotes = imported;
-                    } else if (imported.notes && Array.isArray(imported.notes)) {
-                        // Format 2: Object with notes array {notes: [note1, note2, ...]}
-                        validNotes = imported.notes;
-                    } else if (imported.data && Array.isArray(imported.data)) {
-                        // Format 3: Object with data array {data: [note1, note2, ...]}
-                        validNotes = imported.data;
-                    } else {
-                        showNotification('Unsupported file format - no valid notes found', 'error');
+                    const content = e.target.result;
+                    
+                    // Mobile browsers sometimes add extra characters
+                    const cleanContent = content.trim();
+                    
+                    if (!cleanContent) {
+                        showNotification('File appears to be empty', 'error');
                         return;
                     }
 
-                    // Filter and validate notes
-                    const processedNotes = validNotes.filter(note => 
-                        note && (note.title || note.content)
-                    ).map(note => {
-                        // Ensure all notes have required fields
-                        return {
-                            id: note.id || Date.now() + Math.random(),
-                            title: note.title || 'Imported Note',
-                            content: note.content || '',
-                            created: note.created || new Date().toLocaleDateString(),
-                            createdTime: note.createdTime || new Date().toLocaleTimeString(),
-                            modified: note.modified || null
-                        };
+                    const imported = JSON.parse(cleanContent);
+                    
+                    // Check if it's an array
+                    if (!Array.isArray(imported)) {
+                        console.log('Imported data is not an array:', typeof imported);
+                        showNotification('Invalid file format - expected JSON array', 'error');
+                        return;
+                    }
+
+                    // More flexible validation for mobile
+                    const validNotes = imported.filter(note => {
+                        return note && 
+                               typeof note === 'object' && 
+                               note !== null &&
+                               (note.title || note.content);
                     });
 
-                    if (processedNotes.length === 0) {
+                    if (validNotes.length === 0) {
+                        console.log('No valid notes found in:', imported);
                         showNotification('No valid notes found in file', 'error');
                         return;
                     }
 
-                    // Import the notes
+                    // Ensure proper note structure
+                    validNotes.forEach(note => {
+                        if (!note.id) note.id = Date.now() + Math.random();
+                        if (!note.title) note.title = 'Imported Note';
+                        if (!note.content) note.content = '';
+                        if (!note.created) note.created = new Date().toLocaleDateString();
+                        if (!note.createdTime) note.createdTime = new Date().toLocaleTimeString();
+                    });
+
+                    // Add imported notes
                     if (appData.importType === 'general') {
-                        appData.generalNotes = [...processedNotes, ...appData.generalNotes];
+                        appData.generalNotes = [...validNotes, ...appData.generalNotes];
                     } else {
-                        appData.vaultNotes = [...processedNotes, ...appData.vaultNotes];
+                        appData.vaultNotes = [...validNotes, ...appData.vaultNotes];
                     }
 
                     saveData();
                     render();
-                    showNotification(`Successfully imported ${processedNotes.length} notes!`, 'success');
+                    showNotification(`Successfully imported ${validNotes.length} notes!`, 'success');
 
                 } catch (error) {
                     console.error('Import error:', error);
+                    console.log('File content:', e.target.result);
                     showNotification('Error reading file - invalid JSON format', 'error');
                 }
             };
 
-            reader.readAsText(file);
+            // Use text reading for better mobile compatibility
+            reader.readAsText(file, 'UTF-8');
             event.target.value = '';
         }
 
